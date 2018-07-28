@@ -95,9 +95,7 @@ if __name__ == '__main__':
     step, acc_batch = 0, 100
     acc_train, acc_loss, acc_test = [], [], []
     while True:
-        N_way = np.random.choice(np.arange(5,11))
-        k_shot = np.random.choice(5)+1
-        N_way = 5 # np.random.choice(10)+1
+        N_way = 5 # np.random.choice(np.arange(5,11))
         k_shot = 1 # np.random.choice(5)+1
         x_support, y_support, x_query, y_query = loader.getTrainSample_NoBatch(N_way, k_shot)
 
@@ -113,7 +111,7 @@ if __name__ == '__main__':
         # print('{}({}): {}, {}'.format(step, n_epoch, top1, loss_))
         
         if n_epoch % 10 == 0 and n_epoch != 0:
-            N_way_test = 10 # np.random.choice(10)+1
+            N_way_test = 5 # np.random.choice(10)+1
             k_shot_test = 1 # np.random.choice(5)+1
             x_support_test, y_support_test, x_query_test, y_query_test, origin_i, origin_hat = loader.getTestSample_NoBatch(N_way_test, k_shot_test)
             [prob_t, top_1_t] = session.run([model.prob, model.top_1], feed_dict={
