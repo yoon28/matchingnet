@@ -58,17 +58,19 @@ class MatchNet():
                 layer = tf.nn.max_pool(activ, ksize=[1,2,2,1], strides=[1,2,2,1], padding='VALID')
         return tf.squeeze(layer, [1,2])
 
-    def __init__(self, share_encoder=True):
+    def __init__(self, bn_layer=True, share_encoder=True):
         self.sharing = share_encoder
         scope = 'image_encoder'
         with tf.variable_scope(scope):
-            self.x_hat_encoded = self.convnet_encoder_No_BN(self.x_hat)
+            if bn_layer: self.x_hat_encoded = self.convnet_encoder(self.x_hat)
+            else: self.x_hat_encoded = self.convnet_encoder_No_BN(self.x_hat)
         
         if not self.sharing:
             scope = 'support_set_encoder'
 
         with tf.variable_scope(scope, reuse=self.sharing):
-            self.x_i_encoded = self.convnet_encoder_No_BN(self.x_i)
+            if bn_layer: self.x_i_encoded = self.convnet_encoder(self.x_i)
+            else: self.x_i_encoded = self.convnet_encoder_No_BN(self.x_i)
         
         # self.batchsz = tf.shape(self.x_i_encoded)[0]
         self.dotted = tf.squeeze(tf.matmul(tf.tile(tf.expand_dims(self.x_hat_encoded, 0), [self.n_supports,1,1]), 
