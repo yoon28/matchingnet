@@ -7,7 +7,7 @@ from omniloader import OmniglotLoader as og
 class MatchNet():
 
     eps = 1e-10
-    lean_rate = 1e-5
+    lean_rate = 5e-6
     global_step = tf.Variable(0, trainable=False, name='global_step')
     conv_param = {'k_sz':3, 'f_sz':64, 'c_sz':1, 'n_stack':4}
     n_supports = tf.placeholder(tf.int32)
@@ -95,8 +95,8 @@ if __name__ == '__main__':
     step, acc_batch = 0, 100
     acc_train, acc_loss, acc_test = [], [], []
     while True:
-        N_way = np.random.choice(10)+1
-        k_shot = np.random.choice(5)+1
+        N_way = 5 # np.random.choice(10)+1
+        k_shot = 1 # np.random.choice(5)+1
         x_support, y_support, x_query, y_query = loader.getTrainSample_NoBatch(N_way, k_shot)
 
         [ _, loss_, top1, x_h_, x_i_, dot_, x_hi, x_ii, sim, prob, y_i_, atten, y_hat_ ] = session.run([model.train_step,
@@ -111,8 +111,8 @@ if __name__ == '__main__':
         # print('{}({}): {}, {}'.format(step, n_epoch, top1, loss_))
         
         if n_epoch % 10 == 0 and n_epoch != 0:
-            N_way_test = np.random.choice(10)+1
-            k_shot_test = np.random.choice(5)+1
+            N_way_test = 10 # np.random.choice(10)+1
+            k_shot_test = 1 # np.random.choice(5)+1
             x_support_test, y_support_test, x_query_test, y_query_test, origin_i, origin_hat = loader.getTestSample_NoBatch(N_way_test, k_shot_test)
             [prob_t, top_1_t] = session.run([model.prob, model.top_1], feed_dict={
                 model.n_supports: N_way_test*k_shot_test, model.n_way: N_way_test,

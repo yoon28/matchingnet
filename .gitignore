@@ -1,4 +1,5 @@
 omniglot/
+.vscode/
 __pycache__
 *.pyc
 *.txt
