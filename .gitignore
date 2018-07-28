@@ -1,0 +1,5 @@
+omniglot/
+__pycache__
+*.pyc
+*.txt
+omniglot
