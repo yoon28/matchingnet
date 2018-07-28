@@ -95,6 +95,8 @@ if __name__ == '__main__':
     step, acc_batch = 0, 100
     acc_train, acc_loss, acc_test = [], [], []
     while True:
+        N_way = np.random.choice(np.arange(5,11))
+        k_shot = np.random.choice(5)+1
         N_way = 5 # np.random.choice(10)+1
         k_shot = 1 # np.random.choice(5)+1
         x_support, y_support, x_query, y_query = loader.getTrainSample_NoBatch(N_way, k_shot)
