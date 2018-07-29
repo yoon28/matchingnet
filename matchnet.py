@@ -88,12 +88,15 @@ class MatchNet():
 
 if __name__ == '__main__':
     
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
     loader = og(0)
     model = MatchNet()    
     session = tf.Session()
     session.run(tf.global_variables_initializer())
     print(session.run(tf.report_uninitialized_variables()))
-
+    
     step, acc_batch = 0, 100
     acc_train, acc_loss, acc_test = [], [], []
     while True:
