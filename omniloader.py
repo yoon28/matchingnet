@@ -49,7 +49,7 @@ class OmniglotLoader():
         self.epoch += 1
         self.train_ptr = 0
         
-    def getTrainSample(self, batch_size, N_way, k_shot):
+    def getTrainSample(self, batch_size, N_way, k_shot, disp=False):
         n_support = N_way*k_shot
         x_i_support = np.zeros([batch_size, n_support, self.im_size, self.im_size, self.im_channel]) # one channel (the last dimension)
         y_i_support = np.zeros([batch_size, n_support])
@@ -84,10 +84,11 @@ class OmniglotLoader():
                     x_hat[b, :, :, 0] = img.astype(np.float)/127.5-1
                     y_hat[b] = c
             if need_shuffle: self.shuffling()
-        return x_i_support, y_i_support, x_hat, y_hat
+        if disp: self.displayImage(x_i_support, x_hat)
+        return np.float32(x_i_support), y_i_support, np.float32(x_hat), y_hat
     
-    def getTrainSample_NoBatch(self, N_way, k_shot):
-        x_i, y_i, x_h, y_h = self.getTrainSample(1, N_way, k_shot)
+    def getTrainSample_NoBatch(self, N_way, k_shot, disp=False):
+        x_i, y_i, x_h, y_h = self.getTrainSample(1, N_way, k_shot, disp)
         x_i_ = np.squeeze(x_i, axis=0)
         y_i_ = np.squeeze(y_i, axis=0)
         return x_i_, y_i_, x_h, y_h
@@ -126,7 +127,7 @@ class OmniglotLoader():
                     y_hat[b] = c
                     origins_hat.append([c, clss[0], sample_name])
             origins_i.append(or_i)
-        return x_i_support, y_i_support, x_hat, y_hat, origins_i, origins_hat
+        return np.float32(x_i_support), y_i_support, np.float32(x_hat), y_hat, origins_i, origins_hat
     
     def getTestSample_NoBatch(self, N_way, k_shot):
         x_i, y_i, x_h, y_h, o_i, o_h = self.getTestSample(1, N_way, k_shot)
@@ -137,9 +138,18 @@ class OmniglotLoader():
     def getStatus(self):
         return self.train_ptr, self.n_class_train, self.epoch
 
+    def displayImage(self, x_i, x_h):
+        sz = x_i.shape[1]
+        for s in range(sz):
+            cv2.namedWindow('x_{}'.format(s), cv2.WINDOW_NORMAL)
+            cv2.imshow('x_{}'.format(s), x_i[0,s,:,:,:])
+        cv2.namedWindow('x_h', cv2.WINDOW_NORMAL)
+        cv2.imshow('x_h', x_h[0,:,:,:])
+        cv2.waitKey()
+        cv2.destroyAllWindows()
+
 if __name__ == '__main__':
     loader = OmniglotLoader(0)
-
     batch_size = 16
     N_way, k_shot = 5, 1
     while True:

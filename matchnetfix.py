@@ -6,7 +6,7 @@ from omniloader import OmniglotLoader as og
 
 class MatchNetFix():
     eps = 1e-10
-    learn_rate = 5e-6
+    learn_rate = 1e-5
     global_step = tf.Variable(0, trainable=False, name='global_step')
     conv_param = {'k_sz':3, 'f_sz':64, 'c_sz':1, 'n_stack':4}
     k_shot = 1
@@ -28,7 +28,7 @@ class MatchNetFix():
         layer = inputs
         for l in range(n_stack):
             with tf.variable_scope('conv_{}'.format(l)):
-                filters = tf.get_variable('filter', [k_sz, k_sz, c_sz, f_sz])
+                filters = tf.get_variable('filter', [k_sz, k_sz, c_sz, f_sz], initializer=tf.constant_initializer(0.01))
                 beta = tf.get_variable('BN_beta', [f_sz], initializer=tf.constant_initializer(0.0))
                 gamma = tf.get_variable('BN_gamma', [f_sz], initializer=tf.constant_initializer(1.0))
                 c_sz = f_sz
@@ -39,41 +39,68 @@ class MatchNetFix():
                 layer = tf.nn.max_pool(activ, ksize=[1,2,2,1], strides=[1,2,2,1], padding='VALID')
         return tf.squeeze(layer, [1,2])
 
-    def __init__(self, share_encoder=True):
+    def convnet_encoder_No_BN(self, inputs, reuse=False):
+        k_sz = self.conv_param['k_sz']
+        f_sz = self.conv_param['f_sz']
+        c_sz = self.conv_param['c_sz']
+        n_stack = self.conv_param['n_stack']
+        layer = inputs
+        for l in range(n_stack):
+            with tf.variable_scope('conv_{}'.format(l)):
+                filters = tf.get_variable('filter', [k_sz, k_sz, c_sz, f_sz])
+                bias = tf.get_variable('bias', [f_sz], initializer=tf.constant_initializer(0.0))
+                c_sz = f_sz
+                Z = tf.nn.conv2d(layer, filters, strides=[1,1,1,1], padding='SAME')
+                Z_b = tf.nn.bias_add(Z, bias)
+                activ = tf.nn.relu(Z_b)
+                layer = tf.nn.max_pool(activ, ksize=[1,2,2,1], strides=[1,2,2,1], padding='VALID')
+        return tf.squeeze(layer, [1,2])
+
+    def __init__(self, bn_layer=True, share_encoder=True):
         self.sharing = share_encoder
         scope = 'image_encoder'
         with tf.variable_scope(scope):
-            self.x_hat_encoded = self.convnet_encoder(self.x_hat)
-        self.debug = tf.Print(self.x_hat_encoded, [tf.shape(self.x_hat_encoded), self.x_hat_encoded],'x_hat: ')
+            if bn_layer: self.x_hat_encoded = self.convnet_encoder(self.x_hat)
+            else: self.x_hat_encoded = self.convnet_encoder_No_BN(self.x_hat)
 
         if not self.sharing:
             scope = 'support_set_encoder'
         
         self.cos_sim_list = []
+        self.dotted_list = []
+        self.x_ii = []
         with tf.variable_scope(scope, reuse=self.sharing):
             for i in range(self.n_supports):
-                x_i_encoded = self.convnet_encoder(self.x_i[:,i,:,:,:], self.sharing)
+                if bn_layer: x_i_encoded = self.convnet_encoder(self.x_i[:,i,:,:,:], self.sharing)
+                else: x_i_encoded = self.convnet_encoder_No_BN(self.x_i[:,i,:,:,:], self.sharing)
                 # self.debug = tf.Print(x_i_encoded, [tf.shape(x_i_encoded), x_i_encoded],'x_encoded: ')
                 x_i_inv_mag = tf.rsqrt(tf.clip_by_value(tf.reduce_sum(tf.square(x_i_encoded),1,keepdims=True),self.eps,float('inf')))
                 dotted = tf.squeeze(tf.matmul(tf.expand_dims(self.x_hat_encoded,1), tf.expand_dims(x_i_encoded,2)),[1,])
+                self.dotted_list.append(dotted)
+                self.x_ii.append(x_i_inv_mag)
                 self.cos_sim_list.append(dotted*x_i_inv_mag)
         
-        cos_sim = tf.concat(axis=1, values=self.cos_sim_list)
-        attention = tf.nn.softmax(cos_sim)
-        self.prob = tf.squeeze(tf.matmul(tf.expand_dims(attention,1), self.y_i),[1])
+        self.cos_sim = tf.concat(axis=1, values=self.cos_sim_list)
+        self.attention = tf.nn.softmax(self.cos_sim)
+        self.prob_m = tf.matmul(tf.expand_dims(self.attention,1), self.y_i)
+        self.prob = tf.squeeze(self.prob_m, [1])
+
         self.top_k = tf.nn.in_top_k(self.prob, self.y_hat_idx, 1)
         self.accuracy = tf.reduce_mean(tf.to_float(self.top_k))
         
-        correct_prob = tf.reduce_sum(tf.log( tf.clip_by_value(self.prob, self.eps, 1.0))*self.y_hat, 1)        
-        self.loss = tf.reduce_mean(-correct_prob, 0)
+        self.correct_prob = tf.reduce_sum(tf.log( tf.clip_by_value(self.prob, self.eps, 1.0))*self.y_hat, 1)        
+        self.loss = tf.reduce_mean(-self.correct_prob, 0)
         optim = tf.train.AdamOptimizer(learning_rate=self.learn_rate)
         grad = optim.compute_gradients(self.loss)
         self.train_step = optim.apply_gradients(grad)
 
 if __name__ == '__main__':
     
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
     loader = og(0)
-    model = MatchNetFix()    
+    model = MatchNetFix(bn_layer=True)    
     session = tf.Session()
     session.run(tf.global_variables_initializer())
     print(session.run(tf.report_uninitialized_variables()))
@@ -84,9 +111,14 @@ if __name__ == '__main__':
         batch_size = 1
         N_way = 5
         k_shot = 1
-        x_support, y_support, x_query, y_query = loader.getTrainSample(batch_size, N_way, k_shot)
-        [ _,loss_, prob_, top_k_, acc_ ] = session.run([model.train_step, model.loss, 
-                model.prob, model.top_k, model.accuracy], feed_dict={
+        x_support, y_support, x_query, y_query = loader.getTrainSample(batch_size, N_way, k_shot, False)
+        [ _,loss_, prob_, top_k_, acc_, dot_,
+            sim, atten, prob_m, cprob, y_is, y_h,
+            x_h_en, x_h0, x_ii ] = session.run([model.train_step, model.loss, 
+                model.prob, model.top_k, model.accuracy, model.dotted_list,
+                model.cos_sim, model.attention, model.prob_m, model.correct_prob,
+                model.y_i, model.y_hat,
+                model.x_hat_encoded, model.x_hat, model.x_ii], feed_dict={
                 model.x_i: x_support, model.y_i_idx: y_support,
                 model.x_hat: x_query, model.y_hat_idx: y_query })
         
