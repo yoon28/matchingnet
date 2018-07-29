@@ -20,7 +20,7 @@ class MatchNetFix():
     y_i = tf.one_hot(y_i_idx, n_way)
     y_hat = tf.one_hot(y_hat_idx, n_way)
 
-    def convnet_encoder(self, inputs, reuse=False):
+    def convnet_encoder(self, inputs, reusing=False):
         k_sz = self.conv_param['k_sz']
         f_sz = self.conv_param['f_sz']
         c_sz = self.conv_param['c_sz']
@@ -28,7 +28,8 @@ class MatchNetFix():
         layer = inputs
         for l in range(n_stack):
             with tf.variable_scope('conv_{}'.format(l)):
-                filters = tf.get_variable('filter', [k_sz, k_sz, c_sz, f_sz], initializer=tf.constant_initializer(0.01))
+                filters = tf.get_variable('filter', [k_sz, k_sz, c_sz, f_sz],
+                    initializer=tf.contrib.layers.xavier_initializer())
                 beta = tf.get_variable('BN_beta', [f_sz], initializer=tf.constant_initializer(0.0))
                 gamma = tf.get_variable('BN_gamma', [f_sz], initializer=tf.constant_initializer(1.0))
                 c_sz = f_sz
@@ -39,7 +40,7 @@ class MatchNetFix():
                 layer = tf.nn.max_pool(activ, ksize=[1,2,2,1], strides=[1,2,2,1], padding='VALID')
         return tf.squeeze(layer, [1,2])
 
-    def convnet_encoder_No_BN(self, inputs, reuse=False):
+    def convnet_encoder_No_BN(self, inputs, reusing=False):
         k_sz = self.conv_param['k_sz']
         f_sz = self.conv_param['f_sz']
         c_sz = self.conv_param['c_sz']
@@ -47,7 +48,8 @@ class MatchNetFix():
         layer = inputs
         for l in range(n_stack):
             with tf.variable_scope('conv_{}'.format(l)):
-                filters = tf.get_variable('filter', [k_sz, k_sz, c_sz, f_sz])
+                filters = tf.get_variable('filter', [k_sz, k_sz, c_sz, f_sz],
+                    initializer=tf.contrib.layers.xavier_initializer())
                 bias = tf.get_variable('bias', [f_sz], initializer=tf.constant_initializer(0.0))
                 c_sz = f_sz
                 Z = tf.nn.conv2d(layer, filters, strides=[1,1,1,1], padding='SAME')
@@ -75,6 +77,7 @@ class MatchNetFix():
                 else: x_i_encoded = self.convnet_encoder_No_BN(self.x_i[:,i,:,:,:], self.sharing)
                 # self.debug = tf.Print(x_i_encoded, [tf.shape(x_i_encoded), x_i_encoded],'x_encoded: ')
                 x_i_inv_mag = tf.rsqrt(tf.clip_by_value(tf.reduce_sum(tf.square(x_i_encoded),1,keepdims=True),self.eps,float('inf')))
+                # self.debug = tf.Print(x_i_inv_mag, [tf.shape(x_i_inv_mag), x_i_inv_mag],'x_ii_{}: '.format(i))
                 dotted = tf.squeeze(tf.matmul(tf.expand_dims(self.x_hat_encoded,1), tf.expand_dims(x_i_encoded,2)),[1,])
                 self.dotted_list.append(dotted)
                 self.x_ii.append(x_i_inv_mag)
@@ -97,7 +100,7 @@ class MatchNetFix():
 if __name__ == '__main__':
     
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0" 
 
     loader = og(0)
     model = MatchNetFix(bn_layer=True)    
@@ -107,11 +110,13 @@ if __name__ == '__main__':
 
     step, acc_batch = 0, 100
     acc_train, acc_loss, acc_test = [], [], []
+    warn_tie, warn_uniform = 0, 0
     while True:
         batch_size = 1
         N_way = 5
         k_shot = 1
         x_support, y_support, x_query, y_query = loader.getTrainSample(batch_size, N_way, k_shot, False)
+        # x_support, y_support, x_query, y_query = loader.getFakeSample(N_way, k_shot, False)
         [ _,loss_, prob_, top_k_, acc_, dot_,
             sim, atten, prob_m, cprob, y_is, y_h,
             x_h_en, x_h0, x_ii ] = session.run([model.train_step, model.loss, 
@@ -145,7 +150,12 @@ if __name__ == '__main__':
                     clss = [origin_i[k][chk] for chk in origin_i[k] if origin_i[k][chk][0]==max_loc]
                     for c_j in clss:
                         if c_j[1] != clss[0][1] or c_j[1] != origin_hat[k][1]:
-                            print('error 1')
+                            print('\twarning: tie...')
+                            warn_tie += 1
+                    min_loc = np.argmin(prob_t[k])
+                    if np.fabs(prob_t[k][max_loc]-prob_t[k][min_loc]) <= model.eps:
+                        print('\tuniformly distributed')
+                        warn_uniform += 1
 
         acc_train.append(top_k_[0])
         acc_loss.append(loss_)

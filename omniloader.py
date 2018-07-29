@@ -49,6 +49,25 @@ class OmniglotLoader():
         self.epoch += 1
         self.train_ptr = 0
         
+    def getFakeSample(self, N_way, k_shot, disp=False):
+        batch_size = 1
+        n_support = N_way*k_shot
+        x_i_support = np.zeros([batch_size, n_support, self.im_size, self.im_size, self.im_channel]) # one channel (the last dimension)
+        y_i_support = np.zeros([batch_size, n_support])
+        x_hat = np.zeros([batch_size, self.im_size, self.im_size, self.im_channel])
+        y_hat = np.zeros([batch_size])
+        clss = np.random.choice(N_way)
+        sample_perm = np.random.permutation(n_support)
+        sample_ind = 0
+        for s in range(N_way):
+            x_i_support[0,sample_perm[sample_ind],:,:,:] = np.ones([1, self.im_size, self.im_size, self.im_channel])/(3*(s+1))
+            y_i_support[0,sample_perm[sample_ind]] = s
+            sample_ind += 1
+        x_hat[0] = np.ones([self.im_size, self.im_size, self.im_channel])/(3*(clss+1))
+        y_hat[0] = clss
+        return x_i_support, y_i_support, x_hat, y_hat
+
+
     def getTrainSample(self, batch_size, N_way, k_shot, disp=False):
         n_support = N_way*k_shot
         x_i_support = np.zeros([batch_size, n_support, self.im_size, self.im_size, self.im_channel]) # one channel (the last dimension)

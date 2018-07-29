@@ -22,7 +22,7 @@ class MatchNet():
     y_i = tf.one_hot(y_i_idx, n_way)
     y_hat = tf.one_hot(y_hat_idx, n_way)
 
-    def convnet_encoder(self, inputs, reuse=False):
+    def convnet_encoder(self, inputs, reusing=False):
         k_sz = self.conv_param['k_sz']
         f_sz = self.conv_param['f_sz']
         c_sz = self.conv_param['c_sz']
@@ -30,7 +30,8 @@ class MatchNet():
         layer = inputs
         for l in range(n_stack):
             with tf.variable_scope('conv_{}'.format(l)):
-                filters = tf.get_variable('filter', [k_sz, k_sz, c_sz, f_sz], initializer=tf.constant_initializer(0.01))
+                filters = tf.get_variable('filter', [k_sz, k_sz, c_sz, f_sz], 
+                    initializer=tf.contrib.layers.xavier_initializer())
                 beta = tf.get_variable('BN_beta', [f_sz], initializer=tf.constant_initializer(0.0))
                 gamma = tf.get_variable('BN_gamma', [f_sz], initializer=tf.constant_initializer(1.0))
                 c_sz = f_sz
@@ -41,7 +42,7 @@ class MatchNet():
                 layer = tf.nn.max_pool(activ, ksize=[1,2,2,1], strides=[1,2,2,1], padding='VALID')
         return tf.squeeze(layer, [1,2])
     
-    def convnet_encoder_No_BN(self, inputs, reuse=False):
+    def convnet_encoder_No_BN(self, inputs, reusing=False):
         k_sz = self.conv_param['k_sz']
         f_sz = self.conv_param['f_sz']
         c_sz = self.conv_param['c_sz']
@@ -49,7 +50,8 @@ class MatchNet():
         layer = inputs
         for l in range(n_stack):
             with tf.variable_scope('conv_{}'.format(l)):
-                filters = tf.get_variable('filter', [k_sz, k_sz, c_sz, f_sz])
+                filters = tf.get_variable('filter', [k_sz, k_sz, c_sz, f_sz],
+                    initializer=tf.contrib.layers.xavier_initializer())
                 bias = tf.get_variable('bias', [f_sz], initializer=tf.constant_initializer(0.0))
                 c_sz = f_sz
                 Z = tf.nn.conv2d(layer, filters, strides=[1,1,1,1], padding='SAME')
@@ -76,9 +78,9 @@ class MatchNet():
         self.tiled = tf.tile(tf.expand_dims(self.x_hat_encoded, 0), [self.n_supports,1,1])
         self.dotted = tf.squeeze(tf.matmul(self.tiled,tf.expand_dims(self.x_i_encoded, 2)), [1,2])
         self.x_i2_inv = tf.rsqrt(tf.clip_by_value(tf.reduce_sum(tf.square(self.x_i_encoded), 1), self.eps, float('inf')))
-        self.cos_sim = tf.multiply(self.dotted, self.x_i2_inv)
-        # self.x_h2_inv = tf.rsqrt(tf.clip_by_value(tf.reduce_sum(tf.square(self.x_hat_encoded)), self.eps, float('inf')))
-        # self.cos_sim = tf.multiply(self.dotted, tf.scalar_mul(self.x_h2_inv, self.x_i2_inv))
+        # self.cos_sim = tf.multiply(self.dotted, self.x_i2_inv)
+        self.x_h2_inv = tf.rsqrt(tf.clip_by_value(tf.reduce_sum(tf.square(self.x_hat_encoded)), self.eps, float('inf')))
+        self.cos_sim = tf.multiply(self.dotted, tf.scalar_mul(self.x_h2_inv, self.x_i2_inv))
         self.attention = tf.nn.softmax(self.cos_sim)
         self.prob = tf.matmul(tf.expand_dims(self.attention, 0), self.y_i)
         self.top_1 = tf.nn.in_top_k(self.prob, self.y_hat_idx, 1)
@@ -100,10 +102,14 @@ if __name__ == '__main__':
     
     step, acc_batch = 0, 100
     acc_train, acc_loss, acc_test = [], [], []
+    warn_tie, warn_uniform = 0, 0
     while True:
         N_way = 5 # np.random.choice(np.arange(5,11))
         k_shot = 1 # np.random.choice(5)+1
         x_support, y_support, x_query, y_query = loader.getTrainSample_NoBatch(N_way, k_shot, False)
+        # x_support, y_support, x_query, y_query = loader.getFakeSample(N_way, k_shot, False)
+        # x_support = np.squeeze(x_support, axis=0)
+        # y_support = np.squeeze(y_support, axis=0)
 
         [ _, loss_, top1, x_h_, x_h0, x_i_, dot_, x_ii, sim, prob, y_i_, atten, y_hat_, tiled ] = session.run([model.train_step,
                 model.loss, model.top_1, model.x_hat_encoded, model.x_hat,
@@ -138,11 +144,12 @@ if __name__ == '__main__':
                 clss = [origin_i[chk] for chk in origin_i if origin_i[chk][0] == max_loc]
                 for c_j in clss:
                     if c_j[1] != clss[0][1] or c_j[1] != origin_hat[1]:
-                        min_loc = np.argmax(prob_t[0])
-                        if np.fabs(prob_t[0][max_loc]-prob_t[0][min_loc]) > model.eps:
-                            print('error 1')
-                        else:
-                            print('error: uniformly distributed')
+                        print('\twarning: tie...')
+                        warn_tie += 1
+                min_loc = np.argmin(prob_t[0])
+                if np.fabs(prob_t[0][max_loc]-prob_t[0][min_loc]) <= model.eps:
+                    print('\tuniformly distributed')
+                    warn_uniform += 1
         
         acc_train.append(top1[0])
         acc_loss.append(loss_)
