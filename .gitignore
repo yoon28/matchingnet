@@ -1,4 +1,5 @@
 omniglot/
+model/
 .vscode/
 __pycache__
 *.pyc

@@ -174,8 +174,8 @@ if __name__ == '__main__':
     while True:
         N_way = np.random.choice(10)+1
         k_shot = np.random.choice(5)+1
-        # x_i, y_i, x_hat, y_hat = loader.getTrainSample(batch_size, N_way, k_shot)
-        x_i, y_i, x_hat, y_hat, ori_i, ori_hat = loader.getTestSample(batch_size, N_way, k_shot)
+        x_i, y_i, x_hat, y_hat = loader.getTrainSample(batch_size, N_way, k_shot)
+        # x_i, y_i, x_hat, y_hat, ori_i, ori_hat = loader.getTestSample(batch_size, N_way, k_shot)
         for b in range(batch_size):
             im_s = x_i[b, np.where(y_i[b] == y_hat[b]), : ,:, :]
             n_s = im_s.shape[1]
@@ -185,7 +185,7 @@ if __name__ == '__main__':
             im_h = x_hat[b,:,:,:]
             cv2.namedWindow('h', cv2.WINDOW_NORMAL)
             cv2.imshow('h', im_h)
-            cv2.waitKey(1)       
+            cv2.waitKey()       
             print(N_way, k_shot, loader.getStatus()) 
         
     print(loader.train_chars)

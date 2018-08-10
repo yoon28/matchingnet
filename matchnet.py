@@ -4,6 +4,35 @@ import cv2
 import tensorflow as tf
 from omniloader import OmniglotLoader as og
 
+class attLSTM(tf.contrib.rnn.RNNCell):
+    def __init__(self, num_hidd, g_s, K):
+        self.num_hid = num_hidd
+        self.lstmcell = tf.contrib.rnn.LSTMCell(num_hidd,
+            initializer=tf.contrib.layers.xavier_initializer())
+        self.g_s = g_s # n_support * filter_sz
+        self.K = K
+
+    @property
+    def state_size(self):
+        return self.lstmcell.state_size
+    
+    @property
+    def output_size(self):
+        return self.lstmcell.output_size
+    
+    def __call__(self, inputs, state):
+        h_k = state.h + inputs
+        logits = tf.expand_dims(tf.squeeze(tf.matmul(tf.expand_dims(self.g_s, 1), tf.tile(tf.expand_dims(h_k, 2), [self.K, 1, 1]))), 0)
+        att = tf.transpose(tf.nn.softmax(logits)) # n_support * 1
+        r_k = tf.reduce_sum(tf.multiply(self.g_s, att), 0, keepdims=True)
+        h_concat = tf.reshape( tf.concat([h_k, r_k], 1), [1, 2*self.num_hid] )
+        h_in = tf.layers.dense(inputs=h_concat, units=self.num_hid, use_bias=True,
+            kernel_initializer=tf.contrib.layers.xavier_initializer(), activation=tf.nn.tanh, name='fce_concat_reduce')
+        
+        h_hat, new_state = self.lstmcell(inputs, tf.contrib.rnn.LSTMStateTuple(c=state.c, h=h_in))
+        return h_hat, new_state
+
+
 class MatchNet():
 
     eps = 1e-10
@@ -59,8 +88,36 @@ class MatchNet():
                 activ = tf.nn.relu(Z_b)
                 layer = tf.nn.max_pool(activ, ksize=[1,2,2,1], strides=[1,2,2,1], padding='VALID')
         return tf.squeeze(layer, [1,2])
+    
+    def fce_support_set(self, inputs):
+        with tf.variable_scope('fce_g'):
+            hidd_size = self.conv_param['f_sz']
+            g_f = tf.expand_dims(inputs, 0)
+            lstm_f = tf.contrib.rnn.LSTMCell(hidd_size, name='lstm_f')
+            init_f = lstm_f.zero_state(1, dtype=tf.float32)
+            h_f, _ = tf.nn.dynamic_rnn(lstm_f, g_f, sequence_length=self.n_supports, initial_state=init_f)
 
-    def __init__(self, bn_layer=True, share_encoder=True):
+            g_b = tf.expand_dims(tf.reverse(inputs, [0]), 0)
+            lstm_b = tf.contrib.rnn.LSTMCell(hidd_size, name='lstm_b')
+            init_b = lstm_b.zero_state(1, dtype=tf.float32)
+            h_b, _ = tf.nn.dynamic_rnn(lstm_b, g_b, sequence_length=self.n_supports, initial_state=init_b)
+            h_b = tf.reverse(h_b, [1])
+            
+            g_new = tf.squeeze(h_f, [0]) + tf.squeeze(h_b, [0]) + inputs
+            return g_new
+    
+    def fce_query_image(self, inputs, g_s):
+        with tf.variable_scope('fce_f'):
+            hidd_size = self.conv_param['f_sz']
+            attlstm = attLSTM(hidd_size, g_s, self.n_supports)
+            init_st = attlstm.lstmcell.zero_state(1, dtype=tf.float32)
+            f_x = tf.tile(tf.expand_dims(inputs, 1), [1, self.n_supports, 1])
+            h_hat, att_state = tf.nn.dynamic_rnn(attlstm, f_x, 
+                sequence_length=self.n_supports, initial_state=init_st)
+            
+            return h_hat[:,-1,:] + inputs
+
+    def __init__(self, bn_layer=True, share_encoder=True, fce=False):
         self.sharing = share_encoder
         scope = 'image_encoder'
         with tf.variable_scope(scope):
@@ -75,6 +132,10 @@ class MatchNet():
             else: self.x_i_encoded = self.convnet_encoder_No_BN(self.x_i, self.sharing)
         
         # self.batchsz = tf.shape(self.x_i_encoded)[0]
+        if fce:
+            self.x_i_encoded = self.fce_support_set(self.x_i_encoded)
+            self.x_hat_encoded = self.fce_query_image(self.x_hat_encoded, self.x_i_encoded)
+
         self.tiled = tf.tile(tf.expand_dims(self.x_hat_encoded, 0), [self.n_supports,1,1])
         self.dotted = tf.squeeze(tf.matmul(self.tiled,tf.expand_dims(self.x_i_encoded, 2)), [1,2])
         self.x_i2_inv = tf.rsqrt(tf.clip_by_value(tf.reduce_sum(tf.square(self.x_i_encoded), 1), self.eps, float('inf')))
@@ -92,12 +153,20 @@ class MatchNet():
 if __name__ == '__main__':
     
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
     loader = og(0)
-    model = MatchNet(bn_layer=True)    
+    model = MatchNet(bn_layer=True, fce=True)    
+
+    save_name = 'model/matchnet.ckpt'
+    saver = tf.train.Saver()
     session = tf.Session()
-    session.run(tf.global_variables_initializer())
+    if tf.train.checkpoint_exists(save_name):
+        saver.restore(session, save_name)
+        print('model loaded...')
+    else:
+        session.run(tf.global_variables_initializer())
+        print('model initialized...')
     print(session.run(tf.report_uninitialized_variables()))
     
     step, acc_batch = 0, 100
