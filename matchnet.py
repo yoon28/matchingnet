@@ -11,6 +11,7 @@ class attLSTM(tf.contrib.rnn.RNNCell):
             initializer=tf.contrib.layers.xavier_initializer())
         self.g_s = g_s # n_support * filter_sz
         self.K = K
+        self.g_mag_inv = tf.rsqrt(tf.clip_by_value(tf.reduce_sum(tf.square(self.g_s), 1), 1e-10, float('inf')))
 
     @property
     def state_size(self):
@@ -22,11 +23,11 @@ class attLSTM(tf.contrib.rnn.RNNCell):
     
     def __call__(self, inputs, state):
         h_k = state.h + inputs
-        logits = tf.expand_dims(tf.squeeze(tf.matmul(tf.expand_dims(self.g_s, 1), tf.tile(tf.expand_dims(h_k, 2), [self.K, 1, 1]))), 0)
+        logits = tf.expand_dims(tf.multiply(tf.squeeze(tf.matmul(tf.expand_dims(self.g_s, 1), tf.tile(tf.expand_dims(h_k, 2), [self.K, 1, 1]))), self.g_mag_inv), 0) # norm by mag of g_encode
         att = tf.transpose(tf.nn.softmax(logits)) # n_support * 1
         r_k = tf.reduce_sum(tf.multiply(self.g_s, att), 0, keepdims=True)
         h_concat = tf.reshape( tf.concat([h_k, r_k], 1), [1, 2*self.num_hid] )
-        h_in = tf.layers.dense(inputs=h_concat, units=self.num_hid, use_bias=True,
+        h_in = tf.layers.dense(inputs=h_concat, units=self.num_hid, use_bias=False,
             kernel_initializer=tf.contrib.layers.xavier_initializer(), activation=tf.nn.tanh, name='fce_concat_reduce')
         
         h_hat, new_state = self.lstmcell(inputs, tf.contrib.rnn.LSTMStateTuple(c=state.c, h=h_in))
@@ -139,9 +140,9 @@ class MatchNet():
         self.tiled = tf.tile(tf.expand_dims(self.x_hat_encoded, 0), [self.n_supports,1,1])
         self.dotted = tf.squeeze(tf.matmul(self.tiled,tf.expand_dims(self.x_i_encoded, 2)), [1,2])
         self.x_i2_inv = tf.rsqrt(tf.clip_by_value(tf.reduce_sum(tf.square(self.x_i_encoded), 1), self.eps, float('inf')))
-        # self.cos_sim = tf.multiply(self.dotted, self.x_i2_inv)
-        self.x_h2_inv = tf.rsqrt(tf.clip_by_value(tf.reduce_sum(tf.square(self.x_hat_encoded)), self.eps, float('inf')))
-        self.cos_sim = tf.multiply(self.dotted, tf.scalar_mul(self.x_h2_inv, self.x_i2_inv))
+        self.cos_sim = tf.multiply(self.dotted, self.x_i2_inv)
+        # self.x_h2_inv = tf.rsqrt(tf.clip_by_value(tf.reduce_sum(tf.square(self.x_hat_encoded)), self.eps, float('inf'))) 
+        # self.cos_sim = tf.multiply(self.dotted, tf.scalar_mul(self.x_h2_inv, self.x_i2_inv)) # For the stability of BP
         self.attention = tf.nn.softmax(self.cos_sim)
         self.prob = tf.matmul(tf.expand_dims(self.attention, 0), self.y_i)
         self.top_1 = tf.nn.in_top_k(self.prob, self.y_hat_idx, 1)
