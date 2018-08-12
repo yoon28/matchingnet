@@ -150,6 +150,7 @@ class MatchNet():
         optim = tf.train.AdamOptimizer(learning_rate=self.lean_rate)
         grad = optim.compute_gradients(self.loss)
         self.train_step = optim.apply_gradients(grad)
+        tf.summary.scalar('loss', self.loss)
 
 if __name__ == '__main__':
     
@@ -163,25 +164,29 @@ if __name__ == '__main__':
     saver = tf.train.Saver()
     session = tf.Session()
     if tf.train.checkpoint_exists(save_name):
-        saver.restore(session, save_name)
+        #saver.restore(session, save_name)
+        session.run(tf.global_variables_initializer())
         print('model loaded...')
     else:
         session.run(tf.global_variables_initializer())
         print('model initialized...')
-    print(session.run(tf.report_uninitialized_variables()))
-    
+
     step, acc_batch = 0, 100
     acc_train, acc_loss, acc_test = [], [], []
     warn_tie, warn_uniform = 0, 0
+    min_loss = float('inf')
+    
+    merged = tf.summary.merge_all()
+    log_writer = tf.summary.FileWriter('logs', session.graph)
     while True:
-        N_way = 5 # np.random.choice(np.arange(5,11))
-        k_shot = 1 # np.random.choice(5)+1
+        N_way = np.random.choice(np.arange(5,11))
+        k_shot = np.random.choice(5)+1
         x_support, y_support, x_query, y_query = loader.getTrainSample_NoBatch(N_way, k_shot, False)
         # x_support, y_support, x_query, y_query = loader.getFakeSample(N_way, k_shot, False)
         # x_support = np.squeeze(x_support, axis=0)
         # y_support = np.squeeze(y_support, axis=0)
 
-        [ _, loss_, top1, x_h_, x_h0, x_i_, dot_, x_ii, sim, prob, y_i_, atten, y_hat_, tiled ] = session.run([model.train_step,
+        [ _, summary,loss_, top1, x_h_, x_h0, x_i_, dot_, x_ii, sim, prob, y_i_, atten, y_hat_, tiled ] = session.run([model.train_step, merged,
                 model.loss, model.top_1, model.x_hat_encoded, model.x_hat,
                 model.x_i_encoded, model.dotted, model.x_i2_inv,
                 model.cos_sim, model.prob, model.y_i, model.attention, model.y_hat, model.tiled], feed_dict={
@@ -231,7 +236,13 @@ if __name__ == '__main__':
             acc_m = np.sum(acc_temp)/num_s
             print('{}({}): {:2.2%}, {}'.format(step, n_epoch, acc_m, loss_m))
             acc_train.clear()
-            acc_loss.clear()
+            acc_loss.clear()            
+            log_writer.add_summary(summary, global_step=step)
+            log_writer.flush()
+            if n_epoch % 5 and n_epoch != 0 and min_loss > loss_m:
+                min_loss = loss_m
+                saver.save(session,save_name, global_step=step)
+
         step += 1
         
 
