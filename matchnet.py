@@ -36,7 +36,7 @@ class attLSTM(tf.contrib.rnn.RNNCell):
 
 class MatchNet():
 
-    eps = 1e-10
+    eps = 1e-10  
     lean_rate = 1e-5
     global_step = tf.Variable(0, trainable=False, name='global_step')
     conv_param = {'k_sz':3, 'f_sz':64, 'c_sz':1, 'n_stack':4}
