@@ -37,13 +37,13 @@ class attLSTM(tf.contrib.rnn.RNNCell):
 class MatchNet():
 
     eps = 1e-10  
-    lean_rate = 1e-5
     global_step = tf.Variable(0, trainable=False, name='global_step')
     conv_param = {'k_sz':3, 'f_sz':64, 'c_sz':1, 'n_stack':4}
     n_supports = tf.placeholder(tf.int32)
     n_way = tf.placeholder(tf.int32)
 
     # batch = one matching task, i.e. support set vs query image
+    lr_rate = tf.placeholder(tf.float32, shape=[])
     x_i = tf.placeholder(tf.float32, shape=[None, og.im_size, og.im_size, og.im_channel])
     y_i_idx = tf.placeholder(tf.int32, shape=[None]) # n_support
     x_hat = tf.placeholder(tf.float32, shape=[1, og.im_size, og.im_size, og.im_channel])
@@ -175,7 +175,8 @@ class MatchNet():
         self.prob = tf.matmul(tf.expand_dims(self.attention, 0), self.y_i)
         self.top_1 = tf.nn.in_top_k(self.prob, self.y_hat_idx, 1)
         self.loss = -1*tf.reduce_sum(tf.log(tf.clip_by_value(self.prob, self.eps, 1.0))*self.y_hat)
-        optim = tf.train.AdamOptimizer(learning_rate=self.lean_rate)
+        #optim = tf.train.GradientDescentOptimizer(learning_rate=self.lr_rate)
+        optim = tf.train.AdamOptimizer(learning_rate=self.lr_rate)
         grad = optim.compute_gradients(self.loss)
         self.train_step = optim.apply_gradients(grad)
         tf.summary.scalar('loss', self.loss)
@@ -209,6 +210,7 @@ if __name__ == '__main__':
     while True:
         N_way = np.random.choice(np.arange(5,11))
         k_shot = np.random.choice(5)+1
+        learn_rate = 1e-5
         x_support, y_support, x_query, y_query = loader.getTrainSample_NoBatch(N_way, k_shot, False)
         # x_support, y_support, x_query, y_query = loader.getFakeSample(N_way, k_shot, False)
         # x_support = np.squeeze(x_support, axis=0)
@@ -220,7 +222,8 @@ if __name__ == '__main__':
                 model.cos_sim, model.prob, model.y_i, model.attention, model.y_hat, model.tiled], feed_dict={
                 model.n_supports: N_way*k_shot, model.n_way: N_way,
                 model.x_i: x_support, model.y_i_idx: y_support,
-                model.x_hat: x_query, model.y_hat_idx: y_query })
+                model.x_hat: x_query, model.y_hat_idx: y_query,
+                model.lr_rate: learn_rate })
         
         _, _, n_epoch = loader.getStatus()
         # print('{}({}): {}, {}'.format(step, n_epoch, top1, loss_))
