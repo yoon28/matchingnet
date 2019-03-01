@@ -52,6 +52,25 @@ class MatchNet():
     y_i = tf.one_hot(y_i_idx, n_way)
     y_hat = tf.one_hot(y_hat_idx, n_way)
 
+    def lenet_encoder(self, inputs, reusing=False):
+        with tf.variable_scope('lenet'):
+            filter1 = tf.get_variable('conv1', [5,5,1,6])
+            filter2 = tf.get_variable('conv2', [5,5,6,16])
+            layers = inputs
+            layers = tf.nn.conv2d(layers, filter1, strides=[1,1,1,1], padding='SAME')
+            layers = tf.nn.relu(layers)
+            layers = tf.nn.max_pool(layers, ksize=[1,2,2,1], strides=[1,2,2,1], padding='VALID')
+            
+            layers = tf.nn.conv2d(layers, filter2, strides=[1,1,1,1], padding='VALID')
+            layers = tf.nn.relu(layers)
+            layers = tf.nn.max_pool(layers, ksize=[1,2,2,1], strides=[1,2,2,1], padding='VALID')
+            layers = tf.reshape(layers, [-1, 16*5*5])
+            
+            layers = tf.layers.dense(inputs=layers, units=120, activation=tf.nn.relu)
+            layers = tf.layers.dense(inputs=layers, units=84, activation=tf.nn.relu)
+            layers = tf.layers.dense(inputs=layers, units=64)
+        return layers
+
     def convnet_encoder(self, inputs, reusing=False):
         k_sz = self.conv_param['k_sz']
         f_sz = self.conv_param['f_sz']
@@ -122,15 +141,24 @@ class MatchNet():
         self.sharing = share_encoder
         scope = 'image_encoder'
         with tf.variable_scope(scope):
-            if bn_layer: self.x_hat_encoded = self.convnet_encoder(self.x_hat)
-            else: self.x_hat_encoded = self.convnet_encoder_No_BN(self.x_hat)
+            if bn_layer == True: 
+                self.x_hat_encoded = self.convnet_encoder(self.x_hat)
+            elif bn_layer == False: 
+                self.x_hat_encoded = self.convnet_encoder_No_BN(self.x_hat)
+            elif bn_layer == None:
+                self.x_hat_encoded = self.lenet_encoder(self.x_hat)
         
         if not self.sharing:
             scope = 'support_set_encoder'
 
         with tf.variable_scope(scope, reuse=self.sharing):
-            if bn_layer: self.x_i_encoded = self.convnet_encoder(self.x_i, self.sharing)
-            else: self.x_i_encoded = self.convnet_encoder_No_BN(self.x_i, self.sharing)
+            if bn_layer == True: 
+                self.x_i_encoded = self.convnet_encoder(self.x_i, self.sharing)
+            elif bn_layer == False: 
+                self.x_i_encoded = self.convnet_encoder_No_BN(self.x_i, self.sharing)
+            elif bn_layer == None:
+                self.x_i_encoded = self.lenet_encoder(self.x_i, self.sharing)
+            
         
         # self.batchsz = tf.shape(self.x_i_encoded)[0]
         if fce:
@@ -158,7 +186,7 @@ if __name__ == '__main__':
     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
     loader = og(0)
-    model = MatchNet(bn_layer=True, fce=True)    
+    model = MatchNet(bn_layer=False, fce=True)    
 
     save_name = 'model/matchnet.ckpt'
     saver = tf.train.Saver()
@@ -244,6 +272,3 @@ if __name__ == '__main__':
                 saver.save(session,save_name, global_step=step)
 
         step += 1
-        
-
-        

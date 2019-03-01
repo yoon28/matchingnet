@@ -169,11 +169,11 @@ class OmniglotLoader():
 
 if __name__ == '__main__':
     loader = OmniglotLoader(0)
-    batch_size = 16
+    batch_size = 1
     N_way, k_shot = 5, 1
     while True:
-        N_way = np.random.choice(10)+1
-        k_shot = np.random.choice(5)+1
+        #N_way = np.random.choice(10)+1
+        #k_shot = np.random.choice(5)+1
         x_i, y_i, x_hat, y_hat = loader.getTrainSample(batch_size, N_way, k_shot)
         # x_i, y_i, x_hat, y_hat, ori_i, ori_hat = loader.getTestSample(batch_size, N_way, k_shot)
         for b in range(batch_size):
@@ -185,8 +185,9 @@ if __name__ == '__main__':
             im_h = x_hat[b,:,:,:]
             cv2.namedWindow('h', cv2.WINDOW_NORMAL)
             cv2.imshow('h', im_h)
-            cv2.waitKey()       
             print(N_way, k_shot, loader.getStatus()) 
+            cv2.waitKey()       
+            
         
     print(loader.train_chars)
     print(loader.test_chars)
