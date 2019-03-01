@@ -39,18 +39,64 @@ class MatchNet():
     eps = 1e-10  
     global_step = tf.Variable(0, trainable=False, name='global_step')
     conv_param = {'k_sz':3, 'f_sz':64, 'c_sz':1, 'n_stack':4}
-    n_supports = tf.placeholder(tf.int32)
-    n_way = tf.placeholder(tf.int32)
 
-    # batch = one matching task, i.e. support set vs query image
-    lr_rate = tf.placeholder(tf.float32, shape=[])
-    x_i = tf.placeholder(tf.float32, shape=[None, og.im_size, og.im_size, og.im_channel])
-    y_i_idx = tf.placeholder(tf.int32, shape=[None]) # n_support
-    x_hat = tf.placeholder(tf.float32, shape=[1, og.im_size, og.im_size, og.im_channel])
-    y_hat_idx = tf.placeholder(tf.int32, shape=[1]) # batch size
-    
-    y_i = tf.one_hot(y_i_idx, n_way)
-    y_hat = tf.one_hot(y_hat_idx, n_way)
+    def __init__(self, bn_layer=True, share_encoder=True, fce=False):
+        self.n_supports = tf.placeholder(tf.int32)
+        self.n_way = tf.placeholder(tf.int32)
+
+        # batch = one matching task, i.e. support set vs query image
+        self.lr_rate = tf.placeholder(tf.float32, shape=[])
+        self.x_i = tf.placeholder(tf.float32, shape=[None, og.im_size, og.im_size, og.im_channel])
+        self.y_i_idx = tf.placeholder(tf.int32, shape=[None]) # n_support
+        self.x_hat = tf.placeholder(tf.float32, shape=[1, og.im_size, og.im_size, og.im_channel])
+        self.y_hat_idx = tf.placeholder(tf.int32, shape=[1]) # batch size
+        
+        self.y_i = tf.one_hot(self.y_i_idx, self.n_way)
+        self.y_hat = tf.one_hot(self.y_hat_idx, self.n_way)
+        
+        self.sharing = share_encoder
+        scope = 'image_encoder'
+        with tf.variable_scope(scope):
+            if bn_layer == True: 
+                self.x_hat_encoded = self.convnet_encoder(self.x_hat)
+            elif bn_layer == False: 
+                self.x_hat_encoded = self.convnet_encoder_No_BN(self.x_hat)
+            elif bn_layer == None:
+                self.x_hat_encoded = self.lenet_encoder(self.x_hat)
+        
+        if not self.sharing:
+            scope = 'support_set_encoder'
+
+        with tf.variable_scope(scope, reuse=self.sharing):
+            if bn_layer == True: 
+                self.x_i_encoded = self.convnet_encoder(self.x_i, self.sharing)
+            elif bn_layer == False: 
+                self.x_i_encoded = self.convnet_encoder_No_BN(self.x_i, self.sharing)
+            elif bn_layer == None:
+                self.x_i_encoded = self.lenet_encoder(self.x_i, self.sharing)
+            
+        
+        # self.batchsz = tf.shape(self.x_i_encoded)[0]
+        if fce:
+            self.x_i_encoded = self.fce_support_set(self.x_i_encoded)
+            self.x_hat_encoded = self.fce_query_image(self.x_hat_encoded, self.x_i_encoded)
+
+        self.tiled = tf.tile(tf.expand_dims(self.x_hat_encoded, 0), [self.n_supports,1,1])
+        self.dotted = tf.squeeze(tf.matmul(self.tiled,tf.expand_dims(self.x_i_encoded, 2)), [1,2])
+        self.x_i2_inv = tf.rsqrt(tf.clip_by_value(tf.reduce_sum(tf.square(self.x_i_encoded), 1), self.eps, float('inf')))
+        self.cos_sim = tf.multiply(self.dotted, self.x_i2_inv)
+        # self.x_h2_inv = tf.rsqrt(tf.clip_by_value(tf.reduce_sum(tf.square(self.x_hat_encoded)), self.eps, float('inf'))) 
+        # self.cos_sim = tf.multiply(self.dotted, tf.scalar_mul(self.x_h2_inv, self.x_i2_inv)) # For the stability of BP
+        self.attention = tf.nn.softmax(self.cos_sim)
+        self.prob = tf.matmul(tf.expand_dims(self.attention, 0), self.y_i)
+        self.top_1 = tf.nn.in_top_k(self.prob, self.y_hat_idx, 1)
+        self.loss = -1*tf.reduce_sum(tf.log(tf.clip_by_value(self.prob, self.eps, 1.0))*self.y_hat)
+        #optim = tf.train.GradientDescentOptimizer(learning_rate=self.lr_rate)
+        optim = tf.train.AdamOptimizer(learning_rate=self.lr_rate)
+        grad = optim.compute_gradients(self.loss)
+        self.train_step = optim.apply_gradients(grad)
+        tf.summary.scalar('loss', self.loss)
+
 
     def lenet_encoder(self, inputs, reusing=False):
         with tf.variable_scope('lenet'):
@@ -136,50 +182,6 @@ class MatchNet():
                 sequence_length=self.n_supports, initial_state=init_st)
             
             return h_hat[:,-1,:] + inputs
-
-    def __init__(self, bn_layer=True, share_encoder=True, fce=False):
-        self.sharing = share_encoder
-        scope = 'image_encoder'
-        with tf.variable_scope(scope):
-            if bn_layer == True: 
-                self.x_hat_encoded = self.convnet_encoder(self.x_hat)
-            elif bn_layer == False: 
-                self.x_hat_encoded = self.convnet_encoder_No_BN(self.x_hat)
-            elif bn_layer == None:
-                self.x_hat_encoded = self.lenet_encoder(self.x_hat)
-        
-        if not self.sharing:
-            scope = 'support_set_encoder'
-
-        with tf.variable_scope(scope, reuse=self.sharing):
-            if bn_layer == True: 
-                self.x_i_encoded = self.convnet_encoder(self.x_i, self.sharing)
-            elif bn_layer == False: 
-                self.x_i_encoded = self.convnet_encoder_No_BN(self.x_i, self.sharing)
-            elif bn_layer == None:
-                self.x_i_encoded = self.lenet_encoder(self.x_i, self.sharing)
-            
-        
-        # self.batchsz = tf.shape(self.x_i_encoded)[0]
-        if fce:
-            self.x_i_encoded = self.fce_support_set(self.x_i_encoded)
-            self.x_hat_encoded = self.fce_query_image(self.x_hat_encoded, self.x_i_encoded)
-
-        self.tiled = tf.tile(tf.expand_dims(self.x_hat_encoded, 0), [self.n_supports,1,1])
-        self.dotted = tf.squeeze(tf.matmul(self.tiled,tf.expand_dims(self.x_i_encoded, 2)), [1,2])
-        self.x_i2_inv = tf.rsqrt(tf.clip_by_value(tf.reduce_sum(tf.square(self.x_i_encoded), 1), self.eps, float('inf')))
-        self.cos_sim = tf.multiply(self.dotted, self.x_i2_inv)
-        # self.x_h2_inv = tf.rsqrt(tf.clip_by_value(tf.reduce_sum(tf.square(self.x_hat_encoded)), self.eps, float('inf'))) 
-        # self.cos_sim = tf.multiply(self.dotted, tf.scalar_mul(self.x_h2_inv, self.x_i2_inv)) # For the stability of BP
-        self.attention = tf.nn.softmax(self.cos_sim)
-        self.prob = tf.matmul(tf.expand_dims(self.attention, 0), self.y_i)
-        self.top_1 = tf.nn.in_top_k(self.prob, self.y_hat_idx, 1)
-        self.loss = -1*tf.reduce_sum(tf.log(tf.clip_by_value(self.prob, self.eps, 1.0))*self.y_hat)
-        #optim = tf.train.GradientDescentOptimizer(learning_rate=self.lr_rate)
-        optim = tf.train.AdamOptimizer(learning_rate=self.lr_rate)
-        grad = optim.compute_gradients(self.loss)
-        self.train_step = optim.apply_gradients(grad)
-        tf.summary.scalar('loss', self.loss)
 
 if __name__ == '__main__':
     
