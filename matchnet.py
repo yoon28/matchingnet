@@ -213,7 +213,7 @@ if __name__ == '__main__':
         N_way = np.random.choice(np.arange(5,11))
         k_shot = np.random.choice(5)+1
         learn_rate = 1e-5
-        x_support, y_support, x_query, y_query = loader.getTrainSample_NoBatch(N_way, k_shot, False)
+        x_support, y_support, x_query, y_query,_,_ = loader.getTrainSample_NoBatch(N_way, k_shot, False)
         # x_support, y_support, x_query, y_query = loader.getFakeSample(N_way, k_shot, False)
         # x_support = np.squeeze(x_support, axis=0)
         # y_support = np.squeeze(y_support, axis=0)

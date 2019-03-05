@@ -5,41 +5,43 @@ import numpy as np
 
 class OmniglotLoader():
     
-    dataloc = 'omniglot/'
-    backset = dataloc + 'images_background/'
-    evalset = dataloc + 'images_evaluation/'
-    
-    n_examples_per_char = 20
-    langs1 = os.listdir(backset)
-    langs2 = os.listdir(evalset)
-    
-    train_chars = {}
-    test_chars = {}
-    for lang in langs1:
-        for char in os.listdir(backset+lang):
-            files = os.listdir(backset+lang+'/'+char)
-            class_id = int(files[0].split('_')[0])
-            if class_id <= 1200:
-                train_chars[class_id] = backset+lang+'/'+char
-            else:
-                test_chars[class_id] = backset+lang+'/'+char
-
-    for lang in langs2:
-        for char in os.listdir(evalset+lang):
-            files = os.listdir(evalset+lang+'/'+char)
-            class_id = int(files[0].split('_')[0])
-            if class_id <= 1200:
-                train_chars[class_id] = evalset+lang+'/'+char
-            else:
-                test_chars[class_id] = evalset+lang+'/'+char
-    
-    n_class_train = len(train_chars) 
-    n_class_test = len(test_chars)
     im_size = 28
     im_channel = 1
-    
-    def __init__(self, rdseed):
+
+    def __init__(self, rdseed, dataloc='omniglot/'):
         np.random.seed(rdseed)
+        
+        self.dataloc = dataloc
+        self.backset = dataloc + 'images_background/'
+        self.evalset = dataloc + 'images_evaluation/'
+        
+        self.n_examples_per_char = 20
+        langs1 = os.listdir(self.backset)
+        langs2 = os.listdir(self.evalset)
+
+        self.train_chars = {}
+        self.test_chars = {}
+        for lang in langs1:
+            for char in os.listdir(self.backset+lang):
+                files = os.listdir(self.backset+lang+'/'+char)
+                class_id = int(files[0].split('_')[0])
+                if class_id <= 1200:
+                    self.train_chars[class_id] = self.backset+lang+'/'+char
+                else:
+                    self.test_chars[class_id] = self.backset+lang+'/'+char
+
+        for lang in langs2:
+            for char in os.listdir(self.evalset+lang):
+                files = os.listdir(self.evalset+lang+'/'+char)
+                class_id = int(files[0].split('_')[0])
+                if class_id <= 1200:
+                    self.train_chars[class_id] = self.evalset+lang+'/'+char
+                else:
+                    self.test_chars[class_id] = self.evalset+lang+'/'+char
+
+        self.n_class_train = len(self.train_chars) 
+        self.n_class_test = len(self.test_chars)
+
         self.train_ptr = 0
         self.epoch = 0
         self.permute = np.random.permutation(self.n_class_train) + 1
@@ -74,7 +76,7 @@ class OmniglotLoader():
         y_i_support = np.zeros([batch_size, n_support])
         x_hat = np.zeros([batch_size, self.im_size, self.im_size, self.im_channel])
         y_hat = np.zeros([batch_size])
-
+        origins_i, origins_hat = [], []
         for b in range(batch_size):
             need_shuffle = True if (self.train_ptr + N_way >= self.n_class_train) else False                
 
@@ -85,6 +87,7 @@ class OmniglotLoader():
             sample_perm = np.random.permutation(n_support)
             sample_ind = 0
             hat_class = np.random.choice(N_way)
+            or_i = {}
             for c, clss in enumerate(label_set):
                 ex_ind = np.random.choice(self.n_examples_per_char, k_shot, replace=False) + 1
                 for ex in ex_ind:
@@ -93,6 +96,7 @@ class OmniglotLoader():
                     img = cv2.resize(img, (self.im_size,self.im_size), interpolation=cv2.INTER_AREA)
                     x_i_support[b, sample_perm[sample_ind], :, :, 0] = img.astype(np.float)/127.5 - 1
                     y_i_support[b, sample_perm[sample_ind]] = c
+                    or_i[sample_perm[sample_ind]] = [c, clss[0], sample_name]
                     sample_ind += 1
                 if c == hat_class:
                     allsmps = np.arange(self.n_examples_per_char)+1
@@ -102,15 +106,17 @@ class OmniglotLoader():
                     img = cv2.resize(img, (self.im_size, self.im_size), interpolation=cv2.INTER_AREA)
                     x_hat[b, :, :, 0] = img.astype(np.float)/127.5-1
                     y_hat[b] = c
+                    origins_hat.append([c, clss[0], sample_name])
+            origins_i.append(or_i)
             if need_shuffle: self.shuffling()
         if disp: self.displayImage(x_i_support, x_hat)
-        return np.float32(x_i_support), y_i_support, np.float32(x_hat), y_hat
+        return np.float32(x_i_support), y_i_support, np.float32(x_hat), y_hat, origins_i, origins_hat
     
     def getTrainSample_NoBatch(self, N_way, k_shot, disp=False):
-        x_i, y_i, x_h, y_h = self.getTrainSample(1, N_way, k_shot, disp)
+        x_i, y_i, x_h, y_h, o_i, o_h = self.getTrainSample(1, N_way, k_shot, disp)
         x_i_ = np.squeeze(x_i, axis=0)
         y_i_ = np.squeeze(y_i, axis=0)
-        return x_i_, y_i_, x_h, y_h
+        return x_i_, y_i_, x_h, y_h, o_i[0], o_h[0]
 
     def getTestSample(self, batch_size, N_way, k_shot):
         n_support = N_way*k_shot
@@ -169,12 +175,12 @@ class OmniglotLoader():
 
 if __name__ == '__main__':
     loader = OmniglotLoader(0)
-    batch_size = 1
-    N_way, k_shot = 5, 1
+    batch_size = 2
+    N_way, k_shot = 5, 3
     while True:
         #N_way = np.random.choice(10)+1
         #k_shot = np.random.choice(5)+1
-        x_i, y_i, x_hat, y_hat = loader.getTrainSample(batch_size, N_way, k_shot)
+        x_i, y_i, x_hat, y_hat, o_i, o_h = loader.getTrainSample(batch_size, N_way, k_shot)
         # x_i, y_i, x_hat, y_hat, ori_i, ori_hat = loader.getTestSample(batch_size, N_way, k_shot)
         for b in range(batch_size):
             im_s = x_i[b, np.where(y_i[b] == y_hat[b]), : ,:, :]
@@ -185,8 +191,8 @@ if __name__ == '__main__':
             im_h = x_hat[b,:,:,:]
             cv2.namedWindow('h', cv2.WINDOW_NORMAL)
             cv2.imshow('h', im_h)
-            print(N_way, k_shot, loader.getStatus()) 
-            cv2.waitKey()       
+            print(N_way, k_shot, loader.getStatus())
+            cv2.waitKey()
             
         
     print(loader.train_chars)
