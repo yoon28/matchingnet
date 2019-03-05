@@ -184,9 +184,6 @@ class MatchNet():
             return h_hat[:,-1,:] + inputs
 
 if __name__ == '__main__':
-    
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
     loader = og(0)
     model = MatchNet(bn_layer=False, fce=True)    
